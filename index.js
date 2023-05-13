@@ -1,5 +1,6 @@
-const express = require('express')
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const express = require('express')
+var jwt = require('jsonwebtoken');
 const cors = require('cors');
 require('dotenv').config()
 const app = express()
@@ -23,6 +24,23 @@ const client = new MongoClient(uri, {
     }
 });
 
+const verifyJWT = (req, res, next) => {
+    console.log('hitting verify JWT');
+    const authorization = req.headers.authorization;
+    if (!authorization) {
+        return res.status(401).send({ error: true, message: 'Unauthorize access' })
+    }
+    const token = authorization.split(' ')[1]
+    console.log(token);
+    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (error, decoded) => {
+        if (error) {
+            return res.status(403).send({ error: true, message: 'unauthorize access' })
+        }
+        req.decoded = decoded;
+        next()
+    })
+}
+
 async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
@@ -31,6 +49,17 @@ async function run() {
         const serviceCollection = client.db('carDoctor').collection('services');
         const ordersCollection = client.db('carDoctor').collection('orders');
 
+
+        //jwt
+        app.post('/jwt', (req, res) => {
+            const user = req.body;
+            console.log(user);
+            const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' })
+            res.send({ token })
+        })
+
+
+        // services
         app.get('/services', async (req, res) => {
             const cursor = serviceCollection.find()
             const result = await cursor.toArray()
@@ -49,8 +78,15 @@ async function run() {
         })
 
         // set query
-        app.get('/all-orders', async (req, res) => {
-            console.log(req.query.email);
+        app.get('/all-orders', verifyJWT, async (req, res) => {
+            const decoded = req.decoded;
+            console.log('came back after verify', decoded);
+
+            if (decoded.email !== req.query.email) {
+                return res.status(403).send({ error: 1, message: 'forbidden access' })
+            }
+
+            console.log(req.headers.authorization);
             let query = {}
             if (req.query?.email) {
                 query = { email: req.query.email }
@@ -66,6 +102,26 @@ async function run() {
             res.send(result)
         })
 
+        app.patch('/all-orders/:id', async (req, res) => {
+            const id = req.params.id
+            const filter = { _id: new ObjectId(id) }
+            const updateInfo = req.body;
+            const updatedDoc = {
+                $set: {
+                    status: updateInfo.status
+                }
+            }
+            const result = await ordersCollection.updateOne(filter, updatedDoc)
+            res.send(result)
+        })
+
+        app.delete('/all-orders/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) }
+            const result = await ordersCollection.deleteOne(query)
+            res.send(result);
+            console.log(result);
+        })
 
 
 
